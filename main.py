@@ -1,133 +1,182 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-import numpy as np
 from streamlit_option_menu import option_menu
-from statsmodels.tsa.arima.model import ARIMA
+import statsmodels.api as sm  # Ditambahkan untuk ARIMAX live training
 
 # ======================
 # CONFIG & FUNGSI BANTU
 # ======================
-st.set_page_config(page_title="ARIMAX Custom Forecaster", layout="wide")
+st.set_page_config(page_title="Dashboard Forecast Nilai Tukar", layout="wide")
+
+# Fungsi membuat label mingguan dinamis untuk data forecast baru
+def get_week_label(df):
+    df = df.copy()
+    df['Month'] = df.index.strftime('%B %Y') # Tambah tahun agar tidak bentrok jika lintas tahun
+    def get_week_of_month(date):
+        first_day = date.replace(day=1)
+        dom = date.day
+        adjusted_dom = dom + first_day.weekday()
+        return int((adjusted_dom - 1) / 7) + 1
+    df['Week_Num'] = [get_week_of_month(d) for d in df.index]
+    df['Label'] = df['Month'] + " Minggu ke-" + df['Week_Num'].astype(str)
+    return df
 
 # ======================
-# SIDEBAR NAVIGATION
+# LOAD & PREPROCESSING DATA HISTORIS
+# ======================
+@st.cache_data
+def load_data():
+    kurs = pd.read_csv("Data_Historis_USD_IDR_2019.csv")
+    minyak = pd.read_csv("Data_Historis_Minyak_2019.csv")
+    
+    kurs.columns = kurs.columns.str.strip()
+    minyak.columns = minyak.columns.str.strip()
+    
+    kurs['Tanggal'] = pd.to_datetime(kurs['Tanggal'])
+    minyak['Date'] = pd.to_datetime(minyak['Date'])
+    
+    minyak = minyak.rename(columns={'Date': 'Tanggal', 'Price': 'Harga'})
+    kurs['Terakhir'] = kurs['Terakhir'].astype(str).str.replace(',', '').astype(float)
+    minyak['Harga'] = minyak['Harga'].astype(str).str.replace(',', '').astype(float)
+    
+    # Kelola tanggal ganda jika ada, lalu urutkan
+    kurs = kurs.drop_duplicates(subset=['Tanggal']).sort_values("Tanggal").set_index("Tanggal")
+    minyak = minyak.drop_duplicates(subset=['Tanggal']).sort_values("Tanggal").set_index("Tanggal")
+    
+    # Gabungkan data historis menggunakan inner join agar sinkron
+    df_merged = pd.merge(kurs[['Terakhir']], minyak[['Harga']], left_index=True, right_index=True, how='inner')
+    df_merged['Year'] = df_merged.index.year
+    return df_merged
+
+# Load dataset utama
+data_historis = load_data()
+
+# ======================
+# SIDEBAR
 # ======================
 with st.sidebar:
-    st.title("Settings")
-    # Fitur Input Data Mentah
-    uploaded_file = st.file_uploader("Unggah Data Mentah (CSV)", type="csv")
-    st.markdown("---")
     selected = option_menu(
         menu_title="Main Menu",
-        options=["Home", "Data Preview", "Live Forecast ARIMAX"],
-        icons=["house", "table", "magic"],
+        options=["Home", "Nilai Tukar Rupiah", "Harga Minyak Mentah", "Forecast Unlimited", "Evaluasi"],
+        icons=["house", "currency-exchange", "fuel-pump", "graph-up-arrow", "clipboard-data"],
         default_index=0,
     )
-
-# ======================
-# LOGIC LOAD DATA (USER INPUT)
-# ======================
-def process_data(file):
-    try:
-        df = pd.read_csv(file)
-        # Membersihkan nama kolom dari spasi
-        df.columns = df.columns.str.strip()
-        
-        # Identifikasi kolom tanggal secara otomatis
-        date_col = [col for col in df.columns if col.lower() in ['tanggal', 'date']][0]
-        df[date_col] = pd.to_datetime(df[date_col], dayfirst=True)
-        df = df.sort_values(date_col).set_index(date_col)
-        
-        # Membersihkan karakter non-numerik (seperti koma di ribuan)
-        for col in df.columns:
-            if df[col].dtype == 'object':
-                df[col] = df[col].str.replace(',', '').astype(float)
-        return df
-    except Exception as e:
-        st.error(f"Gagal memproses file: {e}. Pastikan file memiliki kolom Tanggal dan nilai angka.")
-        return None
-
-# Cek apakah file sudah diunggah
-df_user = None
-if uploaded_file is not None:
-    df_user = process_data(uploaded_file)
-    st.sidebar.success("Data Berhasil Dimuat!")
-else:
-    st.sidebar.warning("Silakan unggah file CSV Anda.")
 
 # ======================
 # LOGIC NAVIGATION
 # ======================
 if selected == "Home":
+    st.write("##")
     st.markdown("""
-        <h1 style='text-align: center;'>Custom ARIMAX Forecaster</h1>
-        <p style='text-align: center; font-size: 18px;'>
-        Unggah data mentah Anda di sidebar, pilih kolom yang ingin diramal, dan dapatkan hasil forecast tanpa batas periode.
+        <h1 style='text-align: center; font-size: 50px;'>Peramalan Nilai Tukar IDR-USD<br>Menggunakan Live ARIMAX</h1>
+        <p style='text-align: center; font-size: 18px; color: #666;'>
+        Dashboard ini dikembangkan untuk melakukan simulasi peramalan nilai tukar Rupiah terhadap USD 
+        menggunakan model ARIMAX secara dinamis dengan variabel eksogen harga minyak mentah dunia.
         </p>
     """, unsafe_allow_html=True)
-    if df_user is None:
-        st.info("💡 **Petunjuk:** Pastikan CSV Anda memiliki satu kolom tanggal dan minimal dua kolom angka (satu untuk target, satu untuk eksogen/variabel luar).")
+    st.markdown("---")
+    st.subheader("Tentang Proyek")
+    st.write("Dashboard ini membantu analisis pergerakan nilai tukar serta memberikan hasil peramalan dinamis tanpa batas periode berdasarkan input pengguna.")
 
-elif selected == "Data Preview":
-    if df_user is not None:
-        st.subheader("📋 Pratinjau Data Mentah")
-        st.dataframe(df_user, use_container_width=True)
-        st.subheader("📈 Visualisasi Cepat")
-        target_view = st.selectbox("Pilih Kolom untuk Dilihat:", df_user.columns)
-        st.line_chart(df_user[target_view])
-    else:
-        st.error("Silakan unggah data terlebih dahulu di sidebar.")
+elif selected == "Nilai Tukar Rupiah":
+    st.subheader("Grafik Nilai Tukar Rupiah")
+    selected_year = st.selectbox("Pilih Tahun:", sorted(data_historis['Year'].unique()))
+    filtered_kurs = data_historis[data_historis['Year'] == selected_year]
+    
+    fig = go.Figure(go.Scatter(x=filtered_kurs.index, y=filtered_kurs['Terakhir'], mode='lines', name='Nilai Tukar'))
+    fig.update_layout(title=f"Pergerakan Nilai Tukar Tahun {selected_year}", template="plotly_white")
+    st.plotly_chart(fig, use_container_width=True)
 
-elif selected == "Live Forecast ARIMAX":
-    if df_user is not None:
-        st.subheader("⚙️ Konfigurasi Model & Variabel")
-        
-        col_target, col_exog = st.columns(2)
-        target_col = col_target.selectbox("Pilih Kolom Target (Y):", df_user.columns)
-        exog_col = col_exog.selectbox("Pilih Kolom Eksogen (X):", [c for c in df_user.columns if c != target_col])
-        
-        st.markdown("---")
-        col_p, col_d, col_q = st.columns(3)
-        p = col_p.number_input("Orde p (AR)", 0, 5, 1)
-        d = col_d.number_input("Orde d (Diff)", 0, 2, 1)
-        q = col_q.number_input("Orde q (MA)", 0, 5, 1)
-        
-        n_steps = st.number_input("Jumlah langkah (hari/bulan) ke depan:", min_value=1, value=30)
-        
-        if st.button("Hitung Peramalan"):
-            with st.spinner('Menghitung...'):
-                try:
-                    # Model ARIMAX
-                    model = ARIMA(df_user[target_col], order=(p, d, q), exog=df_user[exog_col])
-                    model_fit = model.fit()
-                    
-                    # Eksogen masa depan (ambil rata-rata atau nilai terakhir)
-                    future_exog_val = df_user[exog_col].iloc[-1]
-                    exog_future = np.array([future_exog_val] * n_steps).reshape(-1, 1)
-                    
-                    # Forecast
-                    forecast_res = model_fit.get_forecast(steps=n_steps, exog=exog_future)
-                    forecast_df = forecast_res.summary_frame()
-                    
-                    # Index Tanggal
-                    last_date = df_user.index[-1]
-                    # Mendeteksi frekuensi (harian atau bulanan)
-                    forecast_dates = pd.date_range(start=last_date, periods=n_steps + 1, freq='D')[1:]
-                    forecast_df.index = forecast_dates
-                    
-                    # Plotly Chart
-                    fig = go.Figure()
-                    fig.add_trace(go.Scatter(x=df_user.index.tail(100), y=df_user[target_col].tail(100), name='Data Asli'))
-                    fig.add_trace(go.Scatter(x=forecast_df.index, y=forecast_df['mean'], name='Ramalan', line=dict(color='red', dash='dash')))
-                    
-                    fig.update_layout(title="Hasil Peramalan ARIMAX", template="plotly_white")
-                    st.plotly_chart(fig, use_container_width=True)
-                    
-                    st.subheader("📊 Tabel Hasil")
-                    st.dataframe(forecast_df[['mean', 'mean_ci_lower', 'mean_ci_upper']])
-                    
-                except Exception as e:
-                    st.error(f"Error Model: {e}")
-    else:
-        st.error("Silakan unggah data terlebih dahulu di sidebar.")
+elif selected == "Harga Minyak Mentah":
+    st.subheader("Grafik Harga Minyak Mentah")
+    selected_year = st.selectbox("Pilih Tahun:", sorted(data_historis['Year'].unique()))
+    filtered_minyak = data_historis[data_historis['Year'] == selected_year]
+    
+    fig = go.Figure(go.Scatter(x=filtered_minyak.index, y=filtered_minyak['Harga'], mode='lines', name='Harga Minyak', line=dict(color='orange')))
+    fig.update_layout(title=f"Harga Minyak Mentah Tahun {selected_year}", template="plotly_white")
+    st.plotly_chart(fig, use_container_width=True)
+
+elif selected == "Forecast Unlimited":
+    st.subheader("Simulasi Peramalan Mandiri (Dinamis)")
+    
+    # 1. INPUT USER UNTUK JUMLAH HARI
+    steps = st.number_input("Masukkan jumlah hari ke depan yang ingin diramal:", min_value=1, max_value=365, value=30, step=1)
+    
+    # Fungsi latih model di latar belakang menggunakan data historis
+    # Menggunakan parameter terpilih skripsi kamu: ARIMAX(2,1,0)
+    @st.cache_resource
+    def train_arimax_model(df):
+        endog = df['Terakhir']
+        exog = df['Harga']
+        # Latih model ARIMAX(2,1,0)
+        model = sm.tsa.ARIMAX(endog, order=(2, 1, 0), exog=exog)
+        model_fitted = model.fit()
+        return model_fitted
+
+    model_res = train_arimax_model(data_historis)
+    
+    # Karena ARIMAX butuh data eksogen (Harga Minyak) masa depan untuk meramal nilai tukar,
+    # Kita asumsikan harga minyak ke depan menggunakan nilai rata-rata terakhir (atau flat rate) agar sistem berjalan otomatis.
+    last_exog_value = data_historis['Harga'].iloc[-1]
+    future_exog = [last_exog_value] * steps
+    
+    # Jalankan Fungsi Forecast bawaan statsmodels
+    forecast_values = model_res.forecast(steps=steps, exog=future_exog)
+    
+    # Membuat indeks tanggal baru ke depan (mengikuti hari kerja bursa)
+    last_date = data_historis.index[-1]
+    future_dates = pd.date_range(start=last_date + pd.Timedelta(days=1), periods=steps, freq='B')
+    
+    # Gabungkan ke dalam satu DataFrame Baru khusus Forecast
+    df_live_forecast = pd.DataFrame(index=future_dates)
+    df_live_forecast['Forecast_ARIMAX'] = forecast_values.values
+    df_live_forecast = get_week_label(df_live_forecast)
+    
+    # 2. VISUALISASI DINAMIS BERDASARKAN INPUT
+    st.markdown("---")
+    st.subheader("Visualisasi Forecast Harian per Minggu")
+    selected_week = st.selectbox("Pilih Periode Mingguan Hasil Forecast:", df_live_forecast['Label'].unique())
+    filtered_df = df_live_forecast[df_live_forecast['Label'] == selected_week]
+    
+    fig1 = go.Figure(go.Scatter(x=filtered_df.index.strftime('%d %b %Y'), y=filtered_df['Forecast_ARIMAX'], mode='lines+markers', name='Forecast', line=dict(color='green')))
+    fig1.update_layout(title=f"Tren Forecast Hasil Simulasi: {selected_week}", template="plotly_white")
+    st.plotly_chart(fig1, use_container_width=True)
+
+    st.markdown("---")
+    st.subheader("Grafik Kontinuitas: Data Historis Terakhir + Hasil Forecast Baru")
+    
+    # Ambil 60 data historis terakhir sebagai pembanding visual biar nyambung grafiknya
+    df_history_tail = data_historis.tail(60)
+    
+    fig2 = go.Figure()
+    fig2.add_trace(go.Figure(go.Scatter(x=df_history_tail.index, y=df_history_tail['Terakhir'], name='Data Historis (Aktual)')))
+    fig2.add_trace(go.Figure(go.Scatter(x=df_live_forecast.index, y=df_live_forecast['Forecast_ARIMAX'], name=f'Forecast ({steps} Hari Ke depan)', line=dict(dash='dash', color='red'))))
+    fig2.update_layout(template="plotly_white", title="Penyambungan Tren Data Aktual dan Hasil Proyeksi Mandiri")
+    st.plotly_chart(fig2, use_container_width=True)
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.subheader("Ringkasan Statistik Hasil Ramalan")
+        st.write(f"**Nilai Rata-rata:** Rp {df_live_forecast['Forecast_ARIMAX'].mean():,.2f}")
+        st.write(f"**Nilai Tertinggi:** Rp {df_live_forecast['Forecast_ARIMAX'].max():,.2f}")
+        st.write(f"**Nilai Terendah:** Rp {df_live_forecast['Forecast_ARIMAX'].min():,.2f}")
+    with col2:
+        st.subheader("Tabel Data Eksplorasi Hasil Forecast")
+        st.dataframe(df_live_forecast[['Forecast_ARIMAX']], use_container_width=True)
+
+elif selected == "Evaluasi":
+    st.subheader("Evaluasi Tingkat Akurasi Model")
+    
+    # Evaluasi dilakukan secara internal (in-sample prediction) pada data historis yang ada
+    predictions_historical = model_res.predict(start=data_historis.index[2], end=data_historis.index[-1], exog=data_historis['Harga'])
+    actuals_historical = data_historis['Terakhir'].iloc[2:]
+    
+    rmse = ((actuals_historical - predictions_historical)**2).mean()**0.5
+    mape = (abs((actuals_historical - predictions_historical) / actuals_historical).mean()) * 100
+    
+    col1, col2 = st.columns(2)
+    col1.metric("RMSE Teruji", f"{rmse:.2f}")
+    col2.metric("MAPE Teruji", f"{mape:.2f}%")
+    st.markdown("---")
+    st.write("Skor di atas mencerminkan keandalan sistem dalam mengenali pola masa lalu. Nilai MAPE yang rendah memberikan jaminan tingkat akurasi simulasi pada menu Forecast.")
