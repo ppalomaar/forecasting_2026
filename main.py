@@ -44,9 +44,12 @@ def load_data():
     minyak = minyak.rename(columns={'Date': 'Tanggal', 'Price': 'Harga'})
     kurs = kurs.rename(columns={'Date': 'Tanggal', 'Price': 'Harga_NilaiTukar'})
     
-    # Pembersihan string ke float tanpa typo
+  # Pembersihan string ke float tanpa typo
     kurs['Harga_NilaiTukar'] = kurs['Harga_NilaiTukar'].astype(str).str.replace(',', '').astype(float)
     minyak['Harga'] = minyak['Harga'].astype(str).str.replace(',', '').astype(float)
+
+    # PERBAIKAN FORMULA: Membalik format IDR/USD menjadi USD/IDR agar bernilai Rp16.000-an
+    kurs['Harga_NilaiTukar'] = 1 / kurs['Harga_NilaiTukar']
 
     kurs = kurs.drop_duplicates(subset=['Tanggal']).sort_values("Tanggal").set_index("Tanggal")
     minyak = minyak.drop_duplicates(subset=['Tanggal']).sort_values("Tanggal").set_index("Tanggal")
