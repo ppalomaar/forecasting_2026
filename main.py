@@ -30,8 +30,9 @@ def get_week_label(df):
 # ======================
 @st.cache_data
 def load_data():
-    kurs = pd.read_csv("Brent Oil Futures Historical Data.csv")
-    minyak = pd.read_csv("IDR_USD Historical Data.csv")
+    # Pembenaran: Membaca file sesuai nama variabel yang tepat
+    minyak = pd.read_csv("Brent Oil Futures Historical Data.csv")
+    kurs = pd.read_csv("IDR_USD Historical Data.csv")
 
     kurs.columns = kurs.columns.str.strip()
     minyak.columns = minyak.columns.str.strip()
@@ -39,15 +40,18 @@ def load_data():
     kurs['Date'] = pd.to_datetime(kurs['Date'])
     minyak['Date'] = pd.to_datetime(minyak['Date'])
 
+    # Menyelaraskan nama kolom Date dan Price dari kedua file
     minyak = minyak.rename(columns={'Date': 'Tanggal', 'Price': 'Harga'})
     kurs = kurs.rename(columns={'Date': 'Tanggal', 'Price': 'Harga_NilaiTukar'})
-    kurs['Terakhir'] = kurs['Terakhir'].astype(str).str.replace(',', '').astype(float)
+    
+    # Pembersihan string ke float tanpa typo
+    kurs['Harga_NilaiTukar'] = kurs['Harga_NilaiTukar'].astype(str).str.replace(',', '').astype(float)
     minyak['Harga'] = minyak['Harga'].astype(str).str.replace(',', '').astype(float)
 
     kurs = kurs.drop_duplicates(subset=['Tanggal']).sort_values("Tanggal").set_index("Tanggal")
     minyak = minyak.drop_duplicates(subset=['Tanggal']).sort_values("Tanggal").set_index("Tanggal")
 
-    df_merged = pd.merge(kurs[['Terakhir']], minyak[['Harga']], left_index=True, right_index=True, how='inner')
+    df_merged = pd.merge(kurs[['Harga_NilaiTukar']], minyak[['Harga']], left_index=True, right_index=True, how='inner')
     df_merged['Year'] = df_merged.index.year
     return df_merged
 
@@ -58,14 +62,14 @@ data_historis = load_data()
 # ======================
 @st.cache_resource
 def train_arimax_model(df):
-    endog = df['Terakhir']
+    endog = df['Harga_NilaiTukar']
     exog = df['Harga']
     model = sm.tsa.ARIMA(endog, order=(0, 1, 3), exog=exog)  
     model_fitted = model.fit()
     return model_fitted
 
 # ======================
-# SIDEBAR (Evaluasi Dihapus)
+# SIDEBAR
 # ======================
 with st.sidebar:
     selected = option_menu(
@@ -101,7 +105,7 @@ elif selected == "Nilai Tukar Rupiah":
 
     fig = go.Figure(go.Scatter(
         x=filtered_kurs.index,
-        y=filtered_kurs['Terakhir'],
+        y=filtered_kurs['Harga_NilaiTukar'],
         mode='lines',
         name='Nilai Tukar'
     ))
@@ -174,7 +178,7 @@ elif selected == "Forecast Unlimited":
     fig2 = go.Figure()
     fig2.add_trace(go.Scatter(
         x=df_history_tail.index,
-        y=df_history_tail['Terakhir'],
+        y=df_history_tail['Harga_NilaiTukar'],  # Pembenaran: diubah dari Terakhir ke Harga_NilaiTukar
         name='Data Historis (Aktual)',
         line=dict(color='blue')
     ))
