@@ -3,16 +3,16 @@ import pandas as pd
 import plotly.graph_objects as go
 from streamlit_option_menu import option_menu
 import statsmodels.api as sm
- 
+
 # Force clear cache
 st.cache_resource.clear()
 st.cache_data.clear()
- 
+
 # ======================
 # CONFIG & FUNGSI BANTU
 # ======================
 st.set_page_config(page_title="Dashboard Forecast Nilai Tukar", layout="wide")
- 
+
 def get_week_label(df):
     df = df.copy()
     df['Month'] = df.index.strftime('%B %Y')
@@ -24,57 +24,57 @@ def get_week_label(df):
     df['Week_Num'] = [get_week_of_month(d) for d in df.index]
     df['Label'] = df['Month'] + " Minggu ke-" + df['Week_Num'].astype(str)
     return df
- 
+
 # ======================
 # LOAD & PREPROCESSING DATA HISTORIS
 # ======================
 @st.cache_data
 def load_data():
-    kurs = pd.read_csv("Data_Historis_USD_IDR_2019.csv")
-    minyak = pd.read_csv("Data_Historis_Minyak_2019.csv")
- 
+    kurs = pd.read_csv("Brent Oil Futures Historical Data.csv")
+    minyak = pd.read_csv("IDR_USD Historical Data.csv")
+
     kurs.columns = kurs.columns.str.strip()
     minyak.columns = minyak.columns.str.strip()
- 
-    kurs['Tanggal'] = pd.to_datetime(kurs['Tanggal'])
+
+    kurs['Date'] = pd.to_datetime(kurs['Date'])
     minyak['Date'] = pd.to_datetime(minyak['Date'])
- 
+
     minyak = minyak.rename(columns={'Date': 'Tanggal', 'Price': 'Harga'})
+    kurs = kurs.rename(columns={'Date': 'Tanggal', 'Price': 'Harga_NilaiTukar'})
     kurs['Terakhir'] = kurs['Terakhir'].astype(str).str.replace(',', '').astype(float)
     minyak['Harga'] = minyak['Harga'].astype(str).str.replace(',', '').astype(float)
- 
+
     kurs = kurs.drop_duplicates(subset=['Tanggal']).sort_values("Tanggal").set_index("Tanggal")
     minyak = minyak.drop_duplicates(subset=['Tanggal']).sort_values("Tanggal").set_index("Tanggal")
- 
+
     df_merged = pd.merge(kurs[['Terakhir']], minyak[['Harga']], left_index=True, right_index=True, how='inner')
     df_merged['Year'] = df_merged.index.year
     return df_merged
- 
+
 data_historis = load_data()
- 
+
 # ======================
 # TRAIN MODEL
-# PERBAIKAN: sm.tsa.ARIMAX tidak ada → diganti sm.tsa.ARIMA
 # ======================
 @st.cache_resource
 def train_arimax_model(df):
     endog = df['Terakhir']
     exog = df['Harga']
-    model = sm.tsa.ARIMA(endog, order=(2, 1, 0), exog=exog)  # <-- SUDAH DIPERBAIKI
+    model = sm.tsa.ARIMA(endog, order=(0, 1, 3), exog=exog)  
     model_fitted = model.fit()
     return model_fitted
- 
+
 # ======================
-# SIDEBAR
+# SIDEBAR (Evaluasi Dihapus)
 # ======================
 with st.sidebar:
     selected = option_menu(
         menu_title="Main Menu",
-        options=["Home", "Nilai Tukar Rupiah", "Harga Minyak Mentah", "Forecast Unlimited", "Evaluasi"],
-        icons=["house", "currency-exchange", "fuel-pump", "graph-up-arrow", "clipboard-data"],
+        options=["Home", "Nilai Tukar Rupiah", "Harga Minyak Mentah", "Forecast Unlimited"],
+        icons=["house", "currency-exchange", "fuel-pump", "graph-up-arrow"],
         default_index=0,
     )
- 
+
 # ======================
 # HOME
 # ======================
@@ -90,7 +90,7 @@ if selected == "Home":
     st.markdown("---")
     st.subheader("Tentang Proyek")
     st.write("Dashboard ini membantu analisis pergerakan nilai tukar serta memberikan hasil peramalan dinamis tanpa batas periode berdasarkan input pengguna.")
- 
+
 # ======================
 # NILAI TUKAR
 # ======================
@@ -98,7 +98,7 @@ elif selected == "Nilai Tukar Rupiah":
     st.subheader("Grafik Nilai Tukar Rupiah")
     selected_year = st.selectbox("Pilih Tahun:", sorted(data_historis['Year'].unique()))
     filtered_kurs = data_historis[data_historis['Year'] == selected_year]
- 
+
     fig = go.Figure(go.Scatter(
         x=filtered_kurs.index,
         y=filtered_kurs['Terakhir'],
@@ -107,7 +107,7 @@ elif selected == "Nilai Tukar Rupiah":
     ))
     fig.update_layout(title=f"Pergerakan Nilai Tukar Tahun {selected_year}", template="plotly_white")
     st.plotly_chart(fig, use_container_width=True)
- 
+
 # ======================
 # HARGA MINYAK
 # ======================
@@ -115,7 +115,7 @@ elif selected == "Harga Minyak Mentah":
     st.subheader("Grafik Harga Minyak Mentah")
     selected_year = st.selectbox("Pilih Tahun:", sorted(data_historis['Year'].unique()))
     filtered_minyak = data_historis[data_historis['Year'] == selected_year]
- 
+
     fig = go.Figure(go.Scatter(
         x=filtered_minyak.index,
         y=filtered_minyak['Harga'],
@@ -125,37 +125,37 @@ elif selected == "Harga Minyak Mentah":
     ))
     fig.update_layout(title=f"Harga Minyak Mentah Tahun {selected_year}", template="plotly_white")
     st.plotly_chart(fig, use_container_width=True)
- 
+
 # ======================
 # FORECAST UNLIMITED
 # ======================
 elif selected == "Forecast Unlimited":
     st.subheader("Simulasi Peramalan Mandiri (Dinamis)")
- 
+
     steps = st.number_input(
         "Masukkan jumlah hari ke depan yang ingin diramal:",
         min_value=1, max_value=365, value=30, step=1
     )
- 
+
     model_res = train_arimax_model(data_historis)
- 
+
     last_exog_value = data_historis['Harga'].iloc[-1]
     future_exog = [last_exog_value] * steps
- 
+
     forecast_values = model_res.forecast(steps=steps, exog=future_exog)
- 
+
     last_date = data_historis.index[-1]
     future_dates = pd.date_range(start=last_date + pd.Timedelta(days=1), periods=steps, freq='B')
- 
+
     df_live_forecast = pd.DataFrame(index=future_dates)
     df_live_forecast['Forecast_ARIMAX'] = forecast_values.values
     df_live_forecast = get_week_label(df_live_forecast)
- 
+
     st.markdown("---")
     st.subheader("Visualisasi Forecast Harian per Minggu")
     selected_week = st.selectbox("Pilih Periode Mingguan Hasil Forecast:", df_live_forecast['Label'].unique())
     filtered_df = df_live_forecast[df_live_forecast['Label'] == selected_week]
- 
+
     fig1 = go.Figure(go.Scatter(
         x=filtered_df.index.strftime('%d %b %Y'),
         y=filtered_df['Forecast_ARIMAX'],
@@ -165,12 +165,12 @@ elif selected == "Forecast Unlimited":
     ))
     fig1.update_layout(title=f"Tren Forecast Hasil Simulasi: {selected_week}", template="plotly_white")
     st.plotly_chart(fig1, use_container_width=True)
- 
+
     st.markdown("---")
     st.subheader("Grafik Kontinuitas: Data Historis Terakhir + Hasil Forecast Baru")
- 
+
     df_history_tail = data_historis.tail(60)
- 
+
     fig2 = go.Figure()
     fig2.add_trace(go.Scatter(
         x=df_history_tail.index,
@@ -189,7 +189,7 @@ elif selected == "Forecast Unlimited":
         title="Penyambungan Tren Data Aktual dan Hasil Proyeksi Mandiri"
     )
     st.plotly_chart(fig2, use_container_width=True)
- 
+
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Ringkasan Statistik Hasil Ramalan")
@@ -199,27 +199,3 @@ elif selected == "Forecast Unlimited":
     with col2:
         st.subheader("Tabel Data Eksplorasi Hasil Forecast")
         st.dataframe(df_live_forecast[['Forecast_ARIMAX']], use_container_width=True)
- 
-# ======================
-# EVALUASI
-# ======================
-elif selected == "Evaluasi":
-    st.subheader("Evaluasi Tingkat Akurasi Model")
- 
-    model_res = train_arimax_model(data_historis)
- 
-    predictions_historical = model_res.predict(
-        start=data_historis.index[2],
-        end=data_historis.index[-1],
-        exog=data_historis['Harga'].iloc[2:]
-    )
-    actuals_historical = data_historis['Terakhir'].iloc[2:]
- 
-    rmse = ((actuals_historical - predictions_historical) ** 2).mean() ** 0.5
-    mape = (abs((actuals_historical - predictions_historical) / actuals_historical).mean()) * 100
- 
-    col1, col2 = st.columns(2)
-    col1.metric("RMSE Teruji", f"{rmse:.2f}")
-    col2.metric("MAPE Teruji", f"{mape:.2f}%")
-    st.markdown("---")
-    st.write("Skor di atas mencerminkan keandalan sistem dalam mengenali pola masa lalu. Nilai MAPE yang rendah memberikan jaminan tingkat akurasi simulasi pada menu Forecast.")
