@@ -67,7 +67,7 @@ data_historis = load_data()
 def train_arimax_model(df):
     endog = df['Harga_NilaiTukar']
     exog = df['Harga']
-    model = sm.tsa.ARIMA(endog, order=(0, 1, 3), exog=exog)  
+    model = sm.tsa.ARIMA(endog, order=(1, 1, 2), exog=exog)  
     model_fitted = model.fit()
     return model_fitted
 
