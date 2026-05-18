@@ -30,7 +30,6 @@ def get_week_label(df):
 # ======================
 @st.cache_data
 def load_data():
-    # Pembenaran: Membaca file sesuai nama variabel yang tepat
     minyak = pd.read_csv("Brent Oil Futures Historical Data.csv")
     kurs = pd.read_csv("IDR_USD Historical Data.csv")
 
@@ -40,15 +39,14 @@ def load_data():
     kurs['Date'] = pd.to_datetime(kurs['Date'])
     minyak['Date'] = pd.to_datetime(minyak['Date'])
 
-    # Menyelaraskan nama kolom Date dan Price dari kedua file
     minyak = minyak.rename(columns={'Date': 'Tanggal', 'Price': 'Harga'})
     kurs = kurs.rename(columns={'Date': 'Tanggal', 'Price': 'Harga_NilaiTukar'})
-    
-  # Pembersihan string ke float tanpa typo
+
+    # FIX INDENTASI: spasi berlebih dihapus
     kurs['Harga_NilaiTukar'] = kurs['Harga_NilaiTukar'].astype(str).str.replace(',', '').astype(float)
     minyak['Harga'] = minyak['Harga'].astype(str).str.replace(',', '').astype(float)
 
-    # PERBAIKAN FORMULA: Membalik format IDR/USD menjadi USD/IDR agar bernilai Rp16.000-an
+    # Membalik format IDR/USD menjadi USD/IDR agar bernilai Rp16.000-an
     kurs['Harga_NilaiTukar'] = 1 / kurs['Harga_NilaiTukar']
 
     kurs = kurs.drop_duplicates(subset=['Tanggal']).sort_values("Tanggal").set_index("Tanggal")
@@ -62,12 +60,14 @@ data_historis = load_data()
 
 # ======================
 # TRAIN MODEL
+# FIX ORDE: data sudah stasioner sebelum differencing (d=0)
+# ACF/PACF menunjukkan p=2, q=0 → ARIMAX(2,0,0)
 # ======================
 @st.cache_resource
 def train_arimax_model(df):
     endog = df['Harga_NilaiTukar']
     exog = df['Harga']
-    model = sm.tsa.ARIMA(endog, order=(1, 0, 3), exog=exog)  
+    model = sm.tsa.ARIMA(endog, order=(2, 0, 0), exog=exog)  # <-- DIUBAH dari (1,0,3) ke (2,0,0)
     model_fitted = model.fit()
     return model_fitted
 
@@ -181,7 +181,7 @@ elif selected == "Forecast Unlimited":
     fig2 = go.Figure()
     fig2.add_trace(go.Scatter(
         x=df_history_tail.index,
-        y=df_history_tail['Harga_NilaiTukar'],  # Pembenaran: diubah dari Terakhir ke Harga_NilaiTukar
+        y=df_history_tail['Harga_NilaiTukar'],
         name='Data Historis (Aktual)',
         line=dict(color='blue')
     ))
